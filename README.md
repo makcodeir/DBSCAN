@@ -34,22 +34,16 @@ Work in progress. Currently implemented:
 
 Planned: the core DBSCAN loop (neighbor search, cluster expansion, noise labeling).
 
-## Build and run the demo
+## Build
 
 ```
 cmake -S . -B build
 cmake --build build
-./build/csv_adapter_demo .
 ```
 
-## Side quest: CSV adapter (`csv_adapter.hpp`)
+## Side quest: `csv_adapter.hpp`
 
-As a supporting piece, the repo ships a schema-driven CSV adapter that loads CSV files
-and maps rows into C++ value classes — handy for feeding datasets into the clustering.
-
-The short version: you describe your data class in a `*.schema` file (field names and
-types), scan a folder of schemas, register a factory for your class, and the adapter
-produces your objects from CSV rows. See `csv_adapter.hpp` and `main.cpp` for the full
-demo covering schemas, delimiters, and error handling.
+A header-only, schema-driven CSV loader that maps CSV rows into C++ value classes.
+It depends on `value.hpp` and the bundled `rapidcsv.h`. See the header for details.
 
 Requires C++17.
