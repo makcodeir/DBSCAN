@@ -1,3 +1,5 @@
+#pragma once
+
 #include <variant>
 #include <string>
 #include <iostream>
@@ -64,4 +66,3 @@ private:
     Storage data;               
 
     };
-

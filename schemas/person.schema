@@ -1,0 +1,8 @@
+# Describes the "person" value class bound to person-shaped CSV files.
+class Person
+---
+name   : string
+age    : int
+height : double
+active : bool
+email  : string?

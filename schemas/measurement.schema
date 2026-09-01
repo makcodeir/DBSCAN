@@ -1,0 +1,7 @@
+# Describes the "measurement" value class; files bound to it use ';' by default.
+class Measurement
+delimiter ;
+---
+sample : string
+temp   : double
+count  : int
