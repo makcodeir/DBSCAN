@@ -3,20 +3,16 @@
 
 class blob{
 public:
-    blob()
-        : noiseMean_(0.0) {
-        generateCenters(4, 2);
-        generatePoints(42);
-    }
-
-    blob(const std::vector<std::vector<double>>& centers, int neighborCount = 42, double noiseMean = 0.0)
-        : centers_(centers), noiseMean_(noiseMean) {
+    blob(int centerCount = 4, int dimensions = 2, int neighborCount = 42,
+         double clusterStd = 0.05, double noiseMean = 0.0)
+        : clusterStd_(clusterStd), noiseMean_(noiseMean) {
+        generateCenters(centerCount, dimensions);
         generatePoints(neighborCount);
     }
 
-    blob(int centerCount, int dimensions = 2, int neighborCount = 42, double noiseMean = 0.0)
-        : noiseMean_(noiseMean) {
-        generateCenters(centerCount, dimensions);
+    blob(const std::vector<std::vector<double>>& centers, int neighborCount = 42,
+         double clusterStd = 0.05, double noiseMean = 0.0)
+        : centers_(centers), clusterStd_(clusterStd), noiseMean_(noiseMean) {
         generatePoints(neighborCount);
     }
 
@@ -26,6 +22,31 @@ public:
 
     const std::vector<std::vector<double>>& points() const {
         return points_;
+    }
+
+    double clusterStd() const {
+        return clusterStd_;
+    }
+
+    double noiseMean() const {
+        return noiseMean_;
+    }
+
+    void regenerate(int neighborCount = 42, double clusterStd = 0.05, double noiseMean = 0.0) {
+        clusterStd_ = clusterStd;
+        noiseMean_ = noiseMean;
+        points_.clear();
+        generatePoints(neighborCount);
+    }
+
+    void regenerateAll(int centerCount = 4, int dimensions = 2, int neighborCount = 42,
+                      double clusterStd = 0.05, double noiseMean = 0.0) {
+        clusterStd_ = clusterStd;
+        noiseMean_ = noiseMean;
+        centers_.clear();
+        points_.clear();
+        generateCenters(centerCount, dimensions);
+        generatePoints(neighborCount);
     }
 
 private:
@@ -41,7 +62,7 @@ private:
     }
 
     void generatePoints(int neighborCount){
-        std::normal_distribution<> dist(noiseMean_, 1.0);
+        std::normal_distribution<> dist(noiseMean_, clusterStd_);
         for(std::size_t c = 0; c < centers_.size(); ++c){
             for(int p = 0; p < neighborCount; ++p){
                 std::vector<double> point(centers_[c].size());
@@ -56,7 +77,8 @@ private:
     std::mt19937 engine_{std::random_device{}()};
     std::vector<std::vector<double>> centers_;
     std::vector<std::vector<double>> points_;
-    double noiseMean_;
+    double clusterStd_{0.05};
+    double noiseMean_{0.0};
 };
 
 // ============================================================================
@@ -73,28 +95,39 @@ private:
 
 #include "imgui.h"
 
-// Computes the bounding box of all generated points.
-// Leaves the outputs untouched when the blob has no points.
+// Computes the bounding box enclosing all generated points and cluster centers.
+// Leaves the outputs untouched when the blob has neither points nor centers.
 void blob_bounds(const blob& b, float& minX, float& minY, float& maxX, float& maxY){
-    if(b.points().empty()){
+    if(b.points().empty() && b.centers().empty()){
         return;
     }
     minX = minY = 1e30f;
     maxX = maxY = -1e30f;
-    for(const auto& p : b.points()){
+
+    auto updateBounds = [&](const std::vector<double>& p){
         const float x = p.empty() ? 0.0f : static_cast<float>(p[0]);
         const float y = p.size() > 1 ? static_cast<float>(p[1]) : 0.0f;
         if(x < minX) minX = x;
         if(y < minY) minY = y;
         if(x > maxX) maxX = x;
         if(y > maxY) maxY = y;
+    };
+
+    for(const auto& p : b.points()){
+        updateBounds(p);
+    }
+    for(const auto& c : b.centers()){
+        updateBounds(c);
     }
 }
 
 // Draws one blob (all points as small dots, cluster centers as big dots)
 // inside the screen rectangle [origin, origin + size] of the given draw list.
+// Supports zoom and pan offset relative to canvas center, and configurable padding.
 void blob_draw(const blob& b, ImDrawList* drawList, const ImVec2& origin,
-               const ImVec2& size, float pointRadius = 3.0f){
+               const ImVec2& size, float pointRadius = 3.0f,
+               float zoom = 1.0f, const ImVec2& panOffset = ImVec2(0.0f, 0.0f),
+               float padding = 30.0f){
     if(!drawList || size.x <= 0.0f || size.y <= 0.0f){
         return;
     }
@@ -102,25 +135,31 @@ void blob_draw(const blob& b, ImDrawList* drawList, const ImVec2& origin,
     float minX = 0.0f, minY = 0.0f, maxX = 0.0f, maxY = 0.0f;
     blob_bounds(b, minX, minY, maxX, maxY);
 
-    // Keep a small margin so border points are not clipped, and guard against
-    // a degenerate bounding box (all points in one spot).
-    const float pad = pointRadius + 2.0f;
+    // Keep margin so border dots and cluster centers (radius + 3) are never clipped.
+    const float pad = padding > 0.0f ? padding : (pointRadius * 2.0f + 20.0f);
     const float spanX = maxX - minX > 1e-9f ? maxX - minX : 1.0f;
     const float spanY = maxY - minY > 1e-9f ? maxY - minY : 1.0f;
-    const float scaleX = (size.x - 2.0f * pad) / spanX;
-    const float scaleY = (size.y - 2.0f * pad) / spanY;
-    const float scale = scaleX < scaleY ? scaleX : scaleY;  // uniform: no distortion
+    const float availX = size.x - 2.0f * pad > 10.0f ? size.x - 2.0f * pad : 10.0f;
+    const float availY = size.y - 2.0f * pad > 10.0f ? size.y - 2.0f * pad : 10.0f;
+    const float scaleX = availX / spanX;
+    const float scaleY = availY / spanY;
+    const float baseScale = scaleX < scaleY ? scaleX : scaleY;  // uniform: no distortion
+    const float scale = baseScale * zoom;
 
-    // Map data coordinates to screen coordinates, centered on the canvas.
+    // Map data coordinates to screen coordinates, centered on the canvas with pan offset.
     const float dataMidX = 0.5f * (minX + maxX);
     const float dataMidY = 0.5f * (minY + minY);
-    const ImVec2 canvasMid(origin.x + 0.5f * size.x, origin.y + 0.5f * size.y);
+    const ImVec2 canvasMid(origin.x + 0.5f * size.x + panOffset.x,
+                           origin.y + 0.5f * size.y + panOffset.y);
     auto toScreen = [&](const std::vector<double>& p){
         const float x = p.empty() ? 0.0f : static_cast<float>(p[0]);
         const float y = p.size() > 1 ? static_cast<float>(p[1]) : 0.0f;
         return ImVec2(canvasMid.x + (x - dataMidX) * scale,
                       canvasMid.y - (y - dataMidY) * scale);  // flip Y: +y up
     };
+
+    // Clip rendering to the canvas viewport
+    drawList->PushClipRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), true);
 
     // Theme colors keep the drawing consistent with the ImGui style.
     const ImU32 pointColor  = ImGui::GetColorU32(ImGuiCol_PlotLines);
@@ -132,6 +171,8 @@ void blob_draw(const blob& b, ImDrawList* drawList, const ImVec2& origin,
 
     // Cluster centers are drawn last so they sit on top of the points.
     for(const auto& c : b.centers()){
-        drawList->AddCircleFilled(toScreen(c), pointRadius + 2.0f, centerColor);
+        drawList->AddCircleFilled(toScreen(c), pointRadius + 3.0f, centerColor);
     }
+
+    drawList->PopClipRect();
 }
